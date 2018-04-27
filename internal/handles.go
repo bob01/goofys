@@ -95,6 +95,8 @@ func (inode *Inode) touch() {
 func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 	mtime := inode.Attributes.Mtime
 	if mtime.IsZero() {
+		// TODO RNG - replace zero (unknown) attribute mtime with default (inode.fs.rootAttrs.Mtime)
+		//mtime = time.Date(1975, 1, 1, 0, 0, 0, 0, time.UTC)
 		mtime = inode.fs.rootAttrs.Mtime
 	}
 
@@ -128,6 +130,7 @@ func (inode *Inode) errFuse(op string, args ...interface{}) {
 	fuseLog.Errorln(op, inode.Id, *inode.FullName(), args)
 }
 
+// TODO RNG inode -> directory
 func (inode *Inode) ToDir() {
 	inode.Attributes = InodeAttributes{
 		Size: 4096,

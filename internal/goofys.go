@@ -187,6 +187,7 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 		fs.sseType = s3.ServerSideEncryptionAes256
 	}
 
+	// TODO RNG - root dir (mount point) attributes
 	now := time.Now()
 	fs.rootAttrs = InodeAttributes{
 		Size:  4096,
@@ -200,6 +201,8 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	root := NewInode(fs, nil, aws.String(""), aws.String(""))
 	root.Id = fuseops.RootInodeID
 	root.ToDir()
+
+	// TODO RNG - root dir (mount point) attributes ('.' on mount point)
 	root.Attributes.Mtime = fs.rootAttrs.Mtime
 
 	fs.inodes[fuseops.RootInodeID] = root
@@ -775,6 +778,9 @@ func (fs *Goofys) insertInodeFromDirEntry(parent *Inode, entry *DirHandleEntry) 
 		inode.KnownSize = &entry.Attributes.Size
 		inode.Attributes.Mtime = entry.Attributes.Mtime
 		inode.AttrTime = time.Now()
+
+		// TODO RNG - doesn't appear
+		inode.Attributes.Mtime = time.Date(1980, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
 	return
 }
@@ -820,6 +826,8 @@ func (fs *Goofys) ReadDir(
 			// from S3 then update the cache time
 			if readFromS3 {
 				inode.dir.DirTime = time.Now()
+
+				// TODO RNG - use time of most recent child for 'this dir' - '.'
 				inode.Attributes.Mtime = inode.findChildMaxTime()
 			}
 			break

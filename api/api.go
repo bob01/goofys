@@ -95,6 +95,9 @@ func Mount(
 
 	awsConfig.S3ForcePathStyle = aws.Bool(true)
 
+	//awsConfig.MaxRetries = aws.Int(16)
+	//fmt.Printf("## AWS max retries = %d\n", *awsConfig.MaxRetries)
+
 	fs = NewGoofys(ctx, bucketName, awsConfig, &flags)
 	if fs == nil {
 		err = fmt.Errorf("Mount: initialization failed")
