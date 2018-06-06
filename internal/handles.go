@@ -943,6 +943,7 @@ func renameObject(fs *Goofys, size int64, fromFullName string, toFullName string
 	return
 }
 
+// TODO RNG the dot-dots
 func (parent *Inode) addDotAndDotDot() {
 	fs := parent.fs
 	en := &DirHandleEntry{

@@ -81,8 +81,8 @@ func NewApp() (app *cli.App) {
 	uid, gid := MyUserAndGroup()
 
 	app = &cli.App{
-		Name:     "goofys",
-		Version:  "0.19.0-" + VersionHash,
+		Name:     "gofs",
+		Version:  "0.19n.0-" + VersionHash,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,

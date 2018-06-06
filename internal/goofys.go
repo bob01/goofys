@@ -188,6 +188,7 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 		fs.sseType = s3.ServerSideEncryptionAes256
 	}
 
+	// TODO RNG - root dir (mount point) attributes - used as defaults for inodes which don't have attributes
 	now := time.Now()
 	fs.rootAttrs = InodeAttributes{
 		Size:  4096,
@@ -202,6 +203,9 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	root.Id = fuseops.RootInodeID
 	root.ToDir()
 	root.Attributes.Mtime = fs.rootAttrs.Mtime
+
+	// TODO RNG dump flags
+	fmt.Printf("** stat TTL %d, type TTL %d\n", fs.flags.StatCacheTTL, fs.flags.TypeCacheTTL)
 
 	fs.inodes[fuseops.RootInodeID] = root
 
@@ -804,6 +808,8 @@ func (fs *Goofys) ReadDir(
 		panic(fmt.Sprintf("can't find dh=%v", op.Handle))
 	}
 
+	fmt.Printf("# reading '%s'...\n", *dh.inode.Name)
+
 	inode := dh.inode
 	inode.logFuse("ReadDir", op.Offset)
 
@@ -825,6 +831,8 @@ func (fs *Goofys) ReadDir(
 				inode.Attributes.Mtime = inode.findChildMaxTime()
 			}
 			break
+		} else {
+			fmt.Printf("# '%s' ('%s') RET\n", *dh.inode.Name, *e.Name)
 		}
 
 		if e.Inode == 0 {
@@ -883,7 +891,10 @@ func (fs *Goofys) OpenFile(
 	fs.fileHandles[handleID] = fh
 
 	op.Handle = handleID
-	op.KeepPageCache = true
+
+	// TODO RNG - we want to see through to the remote FS
+	op.KeepPageCache = false
+	op.UseDirectIO = true
 
 	return
 }

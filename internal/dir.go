@@ -220,24 +220,27 @@ func (dh *DirHandle) listObjects(prefix string) (resp *s3.ListObjectsOutput, err
 
 	fs := dh.inode.fs
 
-	// try to list without delimiter to see if we have slurp up
-	// multiple directories
-	if dh.Marker == nil &&
-		fs.flags.TypeCacheTTL != 0 &&
-		(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2) {
-		go func() {
-			resp, err := dh.listObjectsSlurp(prefix)
-			if err != nil {
-				errSlurpChan <- err
-			} else if resp != nil {
-				slurpChan <- *resp
-			} else {
-				errSlurpChan <- fuse.EINVAL
-			}
-		}()
-	} else {
-		errSlurpChan <- fuse.EINVAL
-	}
+	// TODO RNG don't slurp - invalid for our use case, avoid the extra calls
+	//// try to list without delimiter to see if we have slurp up
+	//// multiple directories
+	//if dh.Marker == nil &&
+	//	fs.flags.TypeCacheTTL != 0 &&
+	//	(dh.inode.Parent != nil && dh.inode.Parent.dir.seqOpenDirScore >= 2) {
+	//	go func() {
+	//		resp, err := dh.listObjectsSlurp(prefix)
+	//		if err != nil {
+	//			errSlurpChan <- err
+	//		} else if resp != nil {
+	//			slurpChan <- *resp
+	//		} else {
+	//			errSlurpChan <- fuse.EINVAL
+	//		}
+	//	}()
+	//} else {
+	//	errSlurpChan <- fuse.EINVAL
+	//}
+
+	errSlurpChan <- fuse.EINVAL
 
 	listObjectsFlat := func() {
 		params := &s3.ListObjectsInput{
@@ -314,7 +317,14 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 
 	en, ok := dh.inode.readDirFromCache(offset)
 	if ok {
+		if(en == nil) {
+			fmt.Printf("# '%s' ('NOENT') cache HIT\n", *dh.inode.Name)
+		} else {
+			fmt.Printf("# '%s' ('%s') cache HIT\n", *dh.inode.Name, *en.Name)
+		}
 		return
+	} else {
+		fmt.Printf("# '%s' (%d) cache MISS\n", *dh.inode.Name, offset)
 	}
 
 	fs := dh.inode.fs
@@ -372,12 +382,19 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 		dh.Entries = make([]*DirHandleEntry, 0, len(resp.CommonPrefixes)+len(resp.Contents))
 
 		// this is only returned for non-slurped responses
+		// TODO RNG raw
+		fmt.Printf("# >>>>>>>> raw: prefix '%s'\n", prefix)
 		for _, dir := range resp.CommonPrefixes {
+			// TODO RNG raw
+			fmt.Printf("# raw: cp='%s'\n", *dir.Prefix)
+
 			// strip trailing /
 			dirName := (*dir.Prefix)[0 : len(*dir.Prefix)-1]
 			// strip previous prefix
 			dirName = dirName[len(*resp.Prefix):]
 			if len(dirName) == 0 {
+				// TODO RNG ignore zero length names
+				fmt.Printf("# ignoring empty '%s'\n", *dir.Prefix)
 				continue
 			}
 			en = &DirHandleEntry{
@@ -391,10 +408,14 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 
 		lastDir := ""
 		for _, obj := range resp.Contents {
+			// TODO RNG raw
+			fmt.Printf("# raw: obj.key='%s'?\n", *obj.Key)
 			if !strings.HasPrefix(*obj.Key, prefix) {
 				// other slurped objects that we cached
 				continue
 			}
+			// TODO RNG raw
+			fmt.Printf("# raw: obj.key='%s'+\n", *obj.Key)
 
 			baseName := (*obj.Key)[len(prefix):]
 
