@@ -317,14 +317,7 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 
 	en, ok := dh.inode.readDirFromCache(offset)
 	if ok {
-		if(en == nil) {
-			fmt.Printf("# '%s' ('NOENT') cache HIT\n", *dh.inode.Name)
-		} else {
-			fmt.Printf("# '%s' ('%s') cache HIT\n", *dh.inode.Name, *en.Name)
-		}
 		return
-	} else {
-		fmt.Printf("# '%s' (%d) cache MISS\n", *dh.inode.Name, offset)
 	}
 
 	fs := dh.inode.fs
@@ -382,12 +375,7 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 		dh.Entries = make([]*DirHandleEntry, 0, len(resp.CommonPrefixes)+len(resp.Contents))
 
 		// this is only returned for non-slurped responses
-		// TODO RNG raw
-		fmt.Printf("# >>>>>>>> raw: prefix '%s'\n", prefix)
 		for _, dir := range resp.CommonPrefixes {
-			// TODO RNG raw
-			fmt.Printf("# raw: cp='%s'\n", *dir.Prefix)
-
 			// strip trailing /
 			dirName := (*dir.Prefix)[0 : len(*dir.Prefix)-1]
 			// strip previous prefix
@@ -408,14 +396,10 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 
 		lastDir := ""
 		for _, obj := range resp.Contents {
-			// TODO RNG raw
-			fmt.Printf("# raw: obj.key='%s'?\n", *obj.Key)
 			if !strings.HasPrefix(*obj.Key, prefix) {
 				// other slurped objects that we cached
 				continue
 			}
-			// TODO RNG raw
-			fmt.Printf("# raw: obj.key='%s'+\n", *obj.Key)
 
 			baseName := (*obj.Key)[len(prefix):]
 

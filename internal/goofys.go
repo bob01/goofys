@@ -811,8 +811,6 @@ func (fs *Goofys) ReadDir(
 		panic(fmt.Sprintf("can't find dh=%v", op.Handle))
 	}
 
-	fmt.Printf("# reading '%s'...\n", *dh.inode.Name)
-
 	inode := dh.inode
 	inode.logFuse("ReadDir", op.Offset)
 
@@ -834,8 +832,6 @@ func (fs *Goofys) ReadDir(
 				inode.Attributes.Mtime = inode.findChildMaxTime()
 			}
 			break
-		} else {
-			fmt.Printf("# '%s' ('%s') RET\n", *dh.inode.Name, *e.Name)
 		}
 
 		if e.Inode == 0 {
