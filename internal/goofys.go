@@ -781,6 +781,9 @@ func (fs *Goofys) insertInodeFromDirEntry(parent *Inode, entry *DirHandleEntry) 
 		inode.KnownSize = &entry.Attributes.Size
 		inode.Attributes.Mtime = entry.Attributes.Mtime
 		inode.AttrTime = time.Now()
+
+		// RNG update inode size too
+		inode.Attributes.Size = entry.Attributes.Size
 	}
 	return
 }
