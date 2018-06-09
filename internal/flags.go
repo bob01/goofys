@@ -82,7 +82,7 @@ func NewApp() (app *cli.App) {
 
 	app = &cli.App{
 		Name:     "gfs",
-		Version:  "0.19o.0-" + VersionHash,
+		Version:  "0.19.0o-" + VersionHash,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
