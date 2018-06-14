@@ -189,10 +189,12 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	}
 
 	// TODO RNG - root dir (mount point) attributes - used as defaults for inodes which don't have attributes
-	now := time.Now()
+	//now := time.Now()
 	fs.rootAttrs = InodeAttributes{
 		Size:  4096,
-		Mtime: now,
+		// TODO RNG DIRMTIME
+		Mtime: time.Date(2000, 1, 1, 5, 0, 0, 0, time.UTC),
+		//Mtime: now,
 	}
 
 	fs.bufferPool = BufferPool{}.Init()
@@ -202,6 +204,7 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	root := NewInode(fs, nil, aws.String(""), aws.String(""))
 	root.Id = fuseops.RootInodeID
 	root.ToDir()
+	// TODO RNG - root inode
 	root.Attributes.Mtime = fs.rootAttrs.Mtime
 
 	// TODO RNG dump flags
@@ -461,6 +464,10 @@ func (fs *Goofys) GetInodeAttributes(
 		op.Attributes = *attr
 		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 	}
+
+	// TODO RNG DIRMTIME
+	//fmt.Printf("* GetInodeAttributesOp(%d:%s), dir=%v, mtime=%v, mtimez=%v\n",
+	//	op.Inode, *inode.Name, inode.isDir(), inode.Attributes.Mtime, inode.Attributes.Mtime.IsZero())
 
 	return
 }
@@ -751,6 +758,11 @@ func (fs *Goofys) insertInodeFromDirEntry(parent *Inode, entry *DirHandleEntry) 
 		inode = NewInode(fs, parent, entry.Name, &path)
 		if entry.Type == fuseutil.DT_Directory {
 			inode.ToDir()
+			// TODO RNG DIRMTIME - use entry mtime if available
+			if !entry.Attributes.Mtime.IsZero() {
+				inode.Attributes.Mtime = entry.Attributes.Mtime
+			}
+
 		} else {
 			inode.Attributes = *entry.Attributes
 		}
@@ -779,7 +791,10 @@ func (fs *Goofys) insertInodeFromDirEntry(parent *Inode, entry *DirHandleEntry) 
 			inode.s3Metadata["storage-class"] = []byte(*entry.StorageClass)
 		}
 		inode.KnownSize = &entry.Attributes.Size
-		inode.Attributes.Mtime = entry.Attributes.Mtime
+		// TODO RNG DIRMTIME - use entry mtime if available
+		if !entry.Attributes.Mtime.IsZero() {
+			inode.Attributes.Mtime = entry.Attributes.Mtime
+		}
 		inode.AttrTime = time.Now()
 
 		// RNG update inode size too
@@ -820,16 +835,28 @@ func (fs *Goofys) ReadDir(
 	readFromS3 := false
 
 	for i := op.Offset; ; i++ {
-		e, err := dh.ReadDir(i)
+		e, gfsens, err := dh.ReadDir(i)
 		if err != nil {
 			return err
 		}
+
+		// RNG apply all gfs entries
+		// - may be seen before of after DT_Directory entry
+		// -- if before: will create inode - DT_Directory expected later won't have/update MTime
+		// -- if after: will update inode created by DT_Directory w/ MTime
+		for _, gfsen := range gfsens {
+			//fmt.Printf("++ gfs %v, %v\n", *gfsen.Name, gfsen.Attributes.Mtime)
+			fs.insertInodeFromDirEntry(inode, gfsen)
+		}
+
 		if e == nil {
 			// we've reached the end, if this was read
 			// from S3 then update the cache time
 			if readFromS3 {
 				inode.dir.DirTime = time.Now()
-				inode.Attributes.Mtime = inode.findChildMaxTime()
+				// TODO RNG DIRMTIME - should have already been set by now - don't depend on children
+				//inode.Attributes.Mtime = inode.findChildMaxTime()
+				//inode.Attributes.Mtime = time.Date(1990, 1, 1, 5, 0, 0, 0, time.UTC)
 			}
 			break
 		}

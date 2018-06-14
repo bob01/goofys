@@ -308,7 +308,7 @@ func objectToDirEntry(fs *Goofys, obj *s3.Object, name string, isDir bool) (en *
 }
 
 // LOCKS_REQUIRED(dh.mu)
-func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err error) {
+func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfsens []*DirHandleEntry, err error) {
 	// If the request is for offset zero, we assume that either this is the first
 	// call or rewinddir has been called. Reset state.
 	if offset == 0 {
@@ -363,16 +363,18 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 			prefix += "/"
 		}
 
+		//fmt.Printf(">>++ listing: '%s'\n", prefix)
 		resp, err := dh.listObjects(prefix)
 		if err != nil {
 			dh.mu.Lock()
-			return nil, mapAwsError(err)
+			return nil, nil, mapAwsError(err)
 		}
 
 		s3Log.Debug(resp)
 		dh.mu.Lock()
 
 		dh.Entries = make([]*DirHandleEntry, 0, len(resp.CommonPrefixes)+len(resp.Contents))
+		gfsens = make([]*DirHandleEntry, 0, len(resp.Contents))
 
 		// this is only returned for non-slurped responses
 		for _, dir := range resp.CommonPrefixes {
@@ -385,10 +387,17 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 				fmt.Printf("# ignoring empty '%s'\n", *dir.Prefix)
 				continue
 			}
+			// TODO RNG DIRMTIME - ZERO time for CP DIR entries
+			commonPrefixAttrs := fs.rootAttrs
+			//commonPrefixAttrs.Mtime = time.Date(1980, 1, 1, 5, 0, 0, 0, time.UTC)
+			commonPrefixAttrs.Mtime = time.Time {}
+
 			en = &DirHandleEntry{
 				Name:       &dirName,
 				Type:       fuseutil.DT_Directory,
-				Attributes: &fs.rootAttrs,
+				// TODO RNG DIRMTIME - readDir assigned
+				//Attributes: &fs.rootAttrs,
+				Attributes: &commonPrefixAttrs,
 			}
 
 			dh.Entries = append(dh.Entries, en)
@@ -407,8 +416,30 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 			if slash == -1 {
 				if len(baseName) == 0 {
 					// shouldn't happen
+					// RNG SLASHDIR - yes it will if slash-dir exists
+					//fmt.Printf("/ key=%v, date=%v", *obj.Key, obj.LastModified)
 					continue
 				}
+
+				// name == *__gfs?
+				if strings.HasSuffix(baseName, GFS_SUFFIX) {
+					// RNG - add obj as gfs entry
+					name := baseName[0:len(baseName) - len(GFS_SUFFIX)]
+					gfsAttrs := fs.rootAttrs
+					
+					// NOTE: may opt to read metadata from GFS file in the future, just use S3 metadata for now
+					gfsAttrs.Mtime = *obj.LastModified
+
+					en = &DirHandleEntry{
+						Name:		&name,
+						Type:		fuseutil.DT_Directory,
+						Attributes: &gfsAttrs,
+					}
+					gfsens = append(gfsens, en)
+					continue
+				}
+
+				// RNG - add obj as file entry
 				dh.Entries = append(dh.Entries,
 					objectToDirEntry(fs, obj, baseName, false))
 			} else {
@@ -457,12 +488,12 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, err 
 
 	if i == len(dh.Entries) {
 		// we've reached the end
-		return nil, nil
+		return nil, gfsens, nil
 	} else if i > len(dh.Entries) {
-		return nil, fuse.EINVAL
+		return nil, nil, fuse.EINVAL
 	}
 
-	return dh.Entries[i], nil
+	return dh.Entries[i], gfsens, nil
 }
 
 func (dh *DirHandle) CloseDir() error {
