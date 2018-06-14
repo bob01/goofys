@@ -94,9 +94,11 @@ func (inode *Inode) touch() {
 
 func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 	mtime := inode.Attributes.Mtime
-	if mtime.IsZero() {
-		mtime = inode.fs.rootAttrs.Mtime
-	}
+
+	// TODO RNG DIRMTIME - don't assume on inflate
+	//if mtime.IsZero() {
+	//	mtime = inode.fs.rootAttrs.Mtime
+	//}
 
 	attr = fuseops.InodeAttributes{
 		Size:   inode.Attributes.Size,
@@ -128,10 +130,13 @@ func (inode *Inode) errFuse(op string, args ...interface{}) {
 	fuseLog.Errorln(op, inode.Id, *inode.FullName(), args)
 }
 
+// TODO RNG DIRMTIME - dir init
 func (inode *Inode) ToDir() {
 	inode.Attributes = InodeAttributes{
 		Size: 4096,
 		// Mtime intentionally not initialized
+		// TODO RNG DIRMTIME
+		//Mtime: time.Date(1977, 1, 1, 5, 0, 0, 0, time.UTC),
 	}
 	inode.dir = &DirInodeData{}
 	inode.KnownSize = &inode.fs.rootAttrs.Size
@@ -982,6 +987,7 @@ func sealPastDirs(dirs map[*Inode]bool, d *Inode) {
 	dirs[d] = false
 }
 
+// TODO RNG SLURP ignore
 func (parent *Inode) insertSubTree(path string, obj *s3.Object, dirs map[*Inode]bool) {
 	fs := parent.fs
 	slash := strings.Index(path, "/")
@@ -1108,7 +1114,11 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 
 	go parent.LookUpInodeNotDir(fullName, objectChan, errObjectChan)
 	if !parent.fs.flags.Cheap {
-		go parent.LookUpInodeNotDir(fullName+"/", dirBlobChan, errDirBlobChan)
+
+		// TODO RNG NOSLASHDIR
+		//go parent.LookUpInodeNotDir(fullName+"/", dirBlobChan, errDirBlobChan)
+		errDirBlobChan <- fuse.ENOENT
+
 		if !parent.fs.flags.ExplicitDir {
 			errDirChan = make(chan error, 1)
 			dirChan = make(chan s3.ListObjectsOutput, 1)
@@ -1146,6 +1156,9 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 				if len(resp.Contents) != 0 && *resp.Contents[0].Key == name+"/" {
 					// it's actually a dir blob
 					entry := resp.Contents[0]
+					// TODO RNG BLOBCHAN
+					fmt.Printf("/ DIRchan: name=%v, fname=%v, time=%v\n", name, fullName, entry.LastModified)
+
 					if entry.ETag != nil {
 						inode.s3Metadata["etag"] = []byte(*entry.ETag)
 					}
@@ -1169,6 +1182,9 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 			checkErr[2] = err
 			s3Log.Debugf("LIST %v/ = %v", fullName, err)
 		case resp := <-dirBlobChan:
+			// TODO RNG BLOBCHAN
+			fmt.Printf("/ BLOBchan: name=%v, fname=%v, time=%v\n", name, fullName, resp.LastModified)
+
 			err = nil
 			inode = NewInode(parent.fs, parent, &name, &fullName)
 			inode.ToDir()
