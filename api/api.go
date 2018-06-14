@@ -54,6 +54,7 @@ type Config struct {
 	DebugFuse  bool
 	DebugS3    bool
 	Foreground bool
+	ShowGfsBlobs bool
 }
 
 func Mount(

@@ -236,6 +236,11 @@ func NewApp() (app *cli.App) {
 				Name:  "f",
 				Usage: "Run goofys in foreground.",
 			},
+
+			cli.BoolFlag{
+				Name:	"show-gfs-blobs",
+				Usage:	"Include __gfs blobs in listings",
+			},
 		},
 	}
 
@@ -254,7 +259,7 @@ func NewApp() (app *cli.App) {
 		flagCategories[f] = "tuning"
 	}
 
-	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f"} {
+	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-blobs"} {
 		flagCategories[f] = "misc"
 	}
 
@@ -302,6 +307,7 @@ type FlagStorage struct {
 	DebugFuse  bool
 	DebugS3    bool
 	Foreground bool
+	ShowGfsBlobs bool
 }
 
 func parseOptions(m map[string]string, s string) {
@@ -369,6 +375,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DebugFuse:  c.Bool("debug_fuse"),
 		DebugS3:    c.Bool("debug_s3"),
 		Foreground: c.Bool("f"),
+		ShowGfsBlobs: c.Bool("show-gfs-blobs"),
 	}
 
 	// Handle the repeated "-o" flag.

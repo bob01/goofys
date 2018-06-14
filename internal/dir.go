@@ -426,7 +426,7 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 					// RNG - add obj as gfs entry
 					name := baseName[0:len(baseName) - len(GFS_SUFFIX)]
 					gfsAttrs := fs.rootAttrs
-					
+
 					// NOTE: may opt to read metadata from GFS file in the future, just use S3 metadata for now
 					gfsAttrs.Mtime = *obj.LastModified
 
@@ -436,7 +436,10 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 						Attributes: &gfsAttrs,
 					}
 					gfsens = append(gfsens, en)
-					continue
+
+					if !fs.flags.ShowGfsBlobs {
+						continue
+					}
 				}
 
 				// RNG - add obj as file entry
