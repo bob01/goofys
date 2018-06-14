@@ -82,7 +82,7 @@ func NewApp() (app *cli.App) {
 
 	app = &cli.App{
 		Name:     "gfs",
-		Version:  "0.19.0o-" + VersionHash,
+		Version:  "0.19.0p-" + VersionHash,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
@@ -304,9 +304,9 @@ type FlagStorage struct {
 	TypeCacheTTL time.Duration
 
 	// Debugging
-	DebugFuse  bool
-	DebugS3    bool
-	Foreground bool
+	DebugFuse    bool
+	DebugS3      bool
+	Foreground   bool
 	ShowGfsBlobs bool
 }
 
@@ -372,9 +372,9 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ACL:            c.String("acl"),
 
 		// Debugging,
-		DebugFuse:  c.Bool("debug_fuse"),
-		DebugS3:    c.Bool("debug_s3"),
-		Foreground: c.Bool("f"),
+		DebugFuse:    c.Bool("debug_fuse"),
+		DebugS3:      c.Bool("debug_s3"),
+		Foreground:   c.Bool("f"),
 		ShowGfsBlobs: c.Bool("show-gfs-blobs"),
 	}
 
