@@ -302,7 +302,7 @@ func (parent *Inode) LookUp(name string) (inode *Inode, err error) {
 	}
 
 	// TODO RNG
-	fmt.Printf("#inode.LookUp('%s', '%s'), mtime=%v\n", name, parent.getChildName(name), inode.Attributes.Mtime)
+	//fmt.Printf("#inode.LookUp('%s', '%s'), mtime=%v\n", name, parent.getChildName(name), inode.Attributes.Mtime)
 	return
 }
 
@@ -455,7 +455,7 @@ func isEmptyDir(fs *Goofys, fullName string) (isDir bool, err error) {
 		Prefix:    fs.key(fullName),
 	}
 
-	fmt.Printf("#s3.isEmptyDir ListObjects(prefix='%s')\n", *fs.key(fullName))
+	//fmt.Printf("#s3.isEmptyDir ListObjects(prefix='%s')\n", *fs.key(fullName))
 	resp, err := fs.s3.ListObjects(params)
 	if err != nil {
 		return false, mapAwsError(err)
@@ -1118,7 +1118,7 @@ func (parent *Inode) readDirFromCache(offset fuseops.DirOffset) (en *DirHandleEn
 func (parent *Inode) LookUpInodeNotDir(name string, c chan s3.HeadObjectOutput, errc chan error) {
 	params := &s3.HeadObjectInput{Bucket: &parent.fs.bucket, Key: parent.fs.key(name)}
 
-	fmt.Printf("#s3.LookUpInodeNotDir HeadObjectInput(key='%s')\n", *parent.fs.key(name))
+	//fmt.Printf("#s3.LookUpInodeNotDir HeadObjectInput(key='%s')\n", *parent.fs.key(name))
 	resp, err := parent.fs.s3.HeadObject(params)
 	if err != nil {
 		errc <- mapAwsError(err)
@@ -1137,7 +1137,7 @@ func (parent *Inode) LookUpInodeDir(name string, c chan s3.ListObjectsOutput, er
 		Prefix:    parent.fs.key(name + "/"),
 	}
 
-	fmt.Printf("#s3.LookUpInodeDir ListObjects(prefix='%s')\n", *parent.fs.key(name + "/"))
+	//fmt.Printf("#s3.LookUpInodeDir ListObjects(prefix='%s')\n", *parent.fs.key(name + "/"))
 	resp, err := parent.fs.s3.ListObjects(params)
 	if err != nil {
 		errc <- mapAwsError(err)
@@ -1180,7 +1180,7 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 		select {
 		// objectChan
 		case resp := <-objectChan:
-			fmt.Printf("@resp objChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName)
+			//fmt.Printf("@resp objChan: name=%v, fname=%v, time=%v\n", name, fullName, *resp.LastModified)
 			// XXX/TODO if both object and object/ exists, return dir
 			inode = NewInode(parent.fs, parent, &name, &fullName)
 			inode.Attributes = InodeAttributes{
@@ -1199,11 +1199,11 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 
 		case e := <-errObjectChan:
 			errors = append(errors, e)
-			fmt.Printf("!%d errObjectChan: %v\n", len(errors), e)
+			//fmt.Printf("!%d errObjectChan: name=%v, fname=%v, err=%v\n", len(errors), name, fullName, e)
 
 		// dirMetaChan
 		case resp := <-dirMetaChan:
-			fmt.Printf("@resp blobChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName, "", resp.LastModified)
+			//fmt.Printf("@resp blobChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName, "", resp.LastModified)
 
 			inode = NewInode(parent.fs, parent, &name, &fullName)
 			inode.ToDir()
@@ -1215,16 +1215,50 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 		case e := <-errDirMetaChan:
 			errDirMeta = &e
 			errors = append(errors, e)
-			fmt.Printf("!%d errMetaChan: %v\n", len(errors), e)
+			//fmt.Printf("!%d errMetaChan: name=%v, fname=%v, err=%v\n", len(errors), name, fullName, e)
 
 		// dirChan
 		case resp := <-dirChan:
-			fmt.Printf("@resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
-			respDir = &resp
+			//fmt.Printf("@resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
+			if len(resp.CommonPrefixes) != 0 || len(resp.Contents) != 0 {
+				// delay handling response until dirMetaChan response known
+				respDir = &resp
+			} else {
+				// response ok, but entry not found - treat as error
+				errors = append(errors, fuse.ENOENT)
+				//fmt.Printf("!-%d errDirChan: name=%v, fname=%v, err=%v\n", len(errors), name, fullName, fuse.ENOENT)
+			}
 
 		case e := <-errDirChan:
 			errors = append(errors, e)
-			fmt.Printf("!%d errDirChan: %v\n", len(errors), e)
+			//fmt.Printf("!%d errDirChan: name=%v, fname=%v, err=%v\n", len(errors), name, fullName, e)
+		}
+
+		// use response from dirChan if dirMetaChan failed
+		if respDir != nil && errDirMeta != nil {
+			// once
+			errDirMeta = nil
+
+			resp := respDir
+			//fmt.Printf("+resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
+			inode = NewInode(parent.fs, parent, &name, &fullName)
+			inode.ToDir()
+			if len(resp.Contents) != 0 && *resp.Contents[0].Key == name+"/" {
+				// it's actually a dir blob
+				entry := resp.Contents[0]
+
+				// capture mtime - should be in sync w/ gfs meta
+				inode.Attributes.Mtime = *entry.LastModified
+
+				if entry.ETag != nil {
+					inode.s3Metadata["etag"] = []byte(*entry.ETag)
+				}
+				if entry.StorageClass != nil {
+					inode.s3Metadata["storage-class"] = []byte(*entry.StorageClass)
+				}
+			}
+			fmt.Printf("#ret: <-dirChan ('%s')\n", fullName)
+			return
 		}
 
 		// bail if all failed
@@ -1233,41 +1267,13 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 			for _, e := range errors {
 				if e != fuse.ENOENT {
 					err = e
+					//fmt.Printf("!!ret: name=%v, fname=%v, err=%v\n", name, fullName, err)
 					return
 				}
 			}
 			err = fuse.ENOENT
-			return 
-		}
-
-		// use response from dirChan if dirMetaChan failed
-		if respDir != nil && errDirMeta != nil {
-			resp := *respDir
-			fmt.Printf("+resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
-			if len(resp.CommonPrefixes) != 0 || len(resp.Contents) != 0 {
-				inode = NewInode(parent.fs, parent, &name, &fullName)
-				inode.ToDir()
-				if len(resp.Contents) != 0 && *resp.Contents[0].Key == name+"/" {
-					// it's actually a dir blob
-					entry := resp.Contents[0]
-
-					// capture mtime - should be in sync w/ gfs meta
-					inode.Attributes.Mtime = *entry.LastModified
-
-					if entry.ETag != nil {
-						inode.s3Metadata["etag"] = []byte(*entry.ETag)
-					}
-					if entry.StorageClass != nil {
-						inode.s3Metadata["storage-class"] = []byte(*entry.StorageClass)
-					}
-				}
-				fmt.Printf("#ret: <-dirChan ('%s')\n", fullName)
-				return
-			} else {
-				// response ok, but entry not found
-				errors = append(errors, fuse.ENOENT)
-				fmt.Printf("!-%d errDirChan: %v\n", len(errors), fuse.ENOENT)
-			}
+			//fmt.Printf("!!ret(def): name=%v, fname=%v, err=%v\n", name, fullName, err)
+			return
 		}
 	}
 }

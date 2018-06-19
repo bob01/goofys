@@ -250,7 +250,7 @@ func (dh *DirHandle) listObjects(prefix string) (resp *s3.ListObjectsOutput, err
 			Prefix:    &prefix,
 		}
 
-		fmt.Printf("#s3.listObjectsFlat ListObjects(prefix='%s')\n", prefix)
+		//fmt.Printf("#s3.listObjectsFlat ListObjects(prefix='%s')\n", prefix)
 		resp, err := fs.s3.ListObjects(params)
 		if err != nil {
 			errListChan <- err
