@@ -123,6 +123,16 @@ func (inode *Inode) touchGfs() (err error) {
 	_, err = fs.s3.PutObject(params)
 	if err != nil {
 		err = mapAwsError(err)
+		return
+	}
+
+	// put / blob
+	params.Key = fs.key(*inode.FullName() + "/")
+
+	_, err = fs.s3.PutObject(params)
+	if err != nil {
+		err = mapAwsError(err)
+		return
 	}
 
 	return
@@ -402,25 +412,6 @@ func (parent *Inode) MkDir(
 
 	fullName := parent.getChildName(name)
 	fs := parent.fs
-
-	params := &s3.PutObjectInput{
-		Bucket: &fs.bucket,
-		Key:    fs.key(fullName + "/"),
-		Body:   nil,
-	}
-
-	if fs.flags.UseSSE {
-		params.ServerSideEncryption = &fs.sseType
-		if fs.flags.UseKMS && fs.flags.KMSKeyID != "" {
-			params.SSEKMSKeyId = &fs.flags.KMSKeyID
-		}
-	}
-
-	_, err = fs.s3.PutObject(params)
-	if err != nil {
-		err = mapAwsError(err)
-		return
-	}
 
 	parent.mu.Lock()
 	defer parent.mu.Unlock()

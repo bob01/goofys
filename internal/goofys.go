@@ -189,12 +189,12 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	}
 
 	// TODO RNG - root dir (mount point) attributes - used as defaults for inodes which don't have attributes
-	//now := time.Now()
+	now := time.Now()
 	fs.rootAttrs = InodeAttributes{
 		Size:  4096,
 		// TODO RNG DIRMTIME
-		Mtime: time.Date(2000, 1, 1, 5, 0, 0, 0, time.UTC),
-		//Mtime: now,
+		//Mtime: time.Date(2000, 1, 1, 5, 0, 0, 0, time.UTC),
+		Mtime: now,
 	}
 
 	fs.bufferPool = BufferPool{}.Init()
