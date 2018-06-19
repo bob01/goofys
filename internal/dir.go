@@ -250,6 +250,7 @@ func (dh *DirHandle) listObjects(prefix string) (resp *s3.ListObjectsOutput, err
 			Prefix:    &prefix,
 		}
 
+		fmt.Printf("#s3.listObjectsFlat ListObjects(prefix='%s')\n", prefix)
 		resp, err := fs.s3.ListObjects(params)
 		if err != nil {
 			errListChan <- err
@@ -323,10 +324,11 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 	fs := dh.inode.fs
 
 	if offset == 0 {
+		// RNG populate attributes w/ this inode's attributes
 		en = &DirHandleEntry{
 			Name:       aws.String("."),
 			Type:       fuseutil.DT_Directory,
-			Attributes: &fs.rootAttrs,
+			Attributes: &dh.inode.Attributes,
 			Offset:     1,
 		}
 		return
@@ -336,6 +338,10 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 			Type:       fuseutil.DT_Directory,
 			Attributes: &fs.rootAttrs,
 			Offset:     2,
+		}
+		// RNG populate attributes w/ this inode's parent's attributes if available
+		if dh.inode.Parent != nil {
+			en.Attributes = &dh.inode.Parent.Attributes
 		}
 		return
 	}
@@ -437,7 +443,7 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 					}
 					gfsens = append(gfsens, en)
 
-					if !fs.flags.ShowGfsBlobs {
+					if !fs.flags.ShowGfsMetadata {
 						continue
 					}
 				}

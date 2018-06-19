@@ -1,3 +1,3 @@
 package internal
 
-const GFS_SUFFIX = "__gfs"
+const GFS_SUFFIX = "__gfs_metadata"

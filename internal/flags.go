@@ -238,8 +238,8 @@ func NewApp() (app *cli.App) {
 			},
 
 			cli.BoolFlag{
-				Name:	"show-gfs-blobs",
-				Usage:	"Include __gfs blobs in listings",
+				Name:	"show-gfs-metadata",
+				Usage:	"Include __gfs_metadata blobs in listings",
 			},
 		},
 	}
@@ -259,7 +259,7 @@ func NewApp() (app *cli.App) {
 		flagCategories[f] = "tuning"
 	}
 
-	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-blobs"} {
+	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-metadata"} {
 		flagCategories[f] = "misc"
 	}
 
@@ -304,10 +304,10 @@ type FlagStorage struct {
 	TypeCacheTTL time.Duration
 
 	// Debugging
-	DebugFuse    bool
-	DebugS3      bool
-	Foreground   bool
-	ShowGfsBlobs bool
+	DebugFuse       bool
+	DebugS3         bool
+	Foreground      bool
+	ShowGfsMetadata bool
 }
 
 func parseOptions(m map[string]string, s string) {
@@ -372,10 +372,10 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		ACL:            c.String("acl"),
 
 		// Debugging,
-		DebugFuse:    c.Bool("debug_fuse"),
-		DebugS3:      c.Bool("debug_s3"),
-		Foreground:   c.Bool("f"),
-		ShowGfsBlobs: c.Bool("show-gfs-blobs"),
+		DebugFuse:       c.Bool("debug_fuse"),
+		DebugS3:         c.Bool("debug_s3"),
+		Foreground:      c.Bool("f"),
+		ShowGfsMetadata: c.Bool("show-gfs-metadata"),
 	}
 
 	// Handle the repeated "-o" flag.

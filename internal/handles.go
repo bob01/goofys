@@ -88,17 +88,53 @@ func (inode *Inode) FullName() *string {
 	}
 }
 
-func (inode *Inode) touch() {
+func (inode *Inode) touch() (err error) {
 	inode.Attributes.Mtime = time.Now()
+
+	if inode.isDir() {
+		err = inode.touchGfs()
+	}
+
+	return
+}
+
+func (inode *Inode) touchGfs() (err error) {
+
+	// bail if this is root node
+	if fuseops.RootInodeID == inode.Id {
+		return
+	}
+
+	// put __gfs blob
+	fs := inode.fs
+	params := &s3.PutObjectInput{
+		Bucket: &fs.bucket,
+		Key:    fs.key(*inode.FullName() + GFS_SUFFIX),
+		Body:   nil,
+	}
+
+	if fs.flags.UseSSE {
+		params.ServerSideEncryption = &fs.sseType
+		if fs.flags.UseKMS && fs.flags.KMSKeyID != "" {
+			params.SSEKMSKeyId = &fs.flags.KMSKeyID
+		}
+	}
+
+	_, err = fs.s3.PutObject(params)
+	if err != nil {
+		err = mapAwsError(err)
+	}
+
+	return
 }
 
 func (inode *Inode) InflateAttributes() (attr fuseops.InodeAttributes) {
 	mtime := inode.Attributes.Mtime
 
 	// TODO RNG DIRMTIME - don't assume on inflate
-	//if mtime.IsZero() {
-	//	mtime = inode.fs.rootAttrs.Mtime
-	//}
+	if mtime.IsZero() {
+		mtime = inode.fs.rootAttrs.Mtime
+	}
 
 	attr = fuseops.InodeAttributes{
 		Size:   inode.Attributes.Size,
@@ -260,11 +296,13 @@ func (parent *Inode) insertChildUnlocked(inode *Inode) {
 func (parent *Inode) LookUp(name string) (inode *Inode, err error) {
 	parent.logFuse("Inode.LookUp", name)
 
-	inode, err = parent.LookUpInodeMaybeDir(name, parent.getChildName(name))
+	inode, err = parent.LookUpInodeMaybeDirGfs(name, parent.getChildName(name))
 	if err != nil {
 		return nil, err
 	}
 
+	// TODO RNG
+	fmt.Printf("#inode.LookUp('%s', '%s'), mtime=%v\n", name, parent.getChildName(name), inode.Attributes.Mtime)
 	return
 }
 
@@ -389,10 +427,20 @@ func (parent *Inode) MkDir(
 
 	inode = NewInode(fs, parent, &name, &fullName)
 	inode.ToDir()
-	inode.touch()
-	if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
-		parent.Attributes.Mtime = inode.Attributes.Mtime
+
+	err = inode.touch()
+	if err != nil {
+		return
 	}
+	err = parent.touch()
+	if err != nil {
+		return
+	}
+
+	// TODO RNG GFSBLOB - handled by gfsTouch
+	//if parent.Attributes.Mtime.Before(inode.Attributes.Mtime) {
+	//	parent.Attributes.Mtime = inode.Attributes.Mtime
+	//}
 
 	return
 }
@@ -407,6 +455,7 @@ func isEmptyDir(fs *Goofys, fullName string) (isDir bool, err error) {
 		Prefix:    fs.key(fullName),
 	}
 
+	fmt.Printf("#s3.isEmptyDir ListObjects(prefix='%s')\n", *fs.key(fullName))
 	resp, err := fs.s3.ListObjects(params)
 	if err != nil {
 		return false, mapAwsError(err)
@@ -1068,6 +1117,8 @@ func (parent *Inode) readDirFromCache(offset fuseops.DirOffset) (en *DirHandleEn
 
 func (parent *Inode) LookUpInodeNotDir(name string, c chan s3.HeadObjectOutput, errc chan error) {
 	params := &s3.HeadObjectInput{Bucket: &parent.fs.bucket, Key: parent.fs.key(name)}
+
+	fmt.Printf("#s3.LookUpInodeNotDir HeadObjectInput(key='%s')\n", *parent.fs.key(name))
 	resp, err := parent.fs.s3.HeadObject(params)
 	if err != nil {
 		errc <- mapAwsError(err)
@@ -1086,6 +1137,7 @@ func (parent *Inode) LookUpInodeDir(name string, c chan s3.ListObjectsOutput, er
 		Prefix:    parent.fs.key(name + "/"),
 	}
 
+	fmt.Printf("#s3.LookUpInodeDir ListObjects(prefix='%s')\n", *parent.fs.key(name + "/"))
 	resp, err := parent.fs.s3.ListObjects(params)
 	if err != nil {
 		errc <- mapAwsError(err)
@@ -1096,40 +1148,39 @@ func (parent *Inode) LookUpInodeDir(name string, c chan s3.ListObjectsOutput, er
 	c <- *resp
 }
 
-// returned inode has nil Id
-func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *Inode, err error) {
-	errObjectChan := make(chan error, 1)
-	objectChan := make(chan s3.HeadObjectOutput, 1)
-	errDirBlobChan := make(chan error, 1)
-	dirBlobChan := make(chan s3.HeadObjectOutput, 1)
-	var errDirChan chan error
-	var dirChan chan s3.ListObjectsOutput
-
-	checking := 3
-	var checkErr [3]error
-
+// RNG altered resolution ops
+func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode *Inode, err error) {
 	if parent.fs.s3 == nil {
 		panic("s3 disabled")
 	}
 
+	errObjectChan := make(chan error, 1)
+	objectChan := make(chan s3.HeadObjectOutput, 1)
+	errDirMetaChan := make(chan error, 1)
+	dirMetaChan := make(chan s3.HeadObjectOutput, 1)
+	errDirChan := make(chan error, 1)
+	dirChan := make(chan s3.ListObjectsOutput, 1)
+
+	var errDirMeta *error
+	var respDir *s3.ListObjectsOutput
+
+	// try as object
 	go parent.LookUpInodeNotDir(fullName, objectChan, errObjectChan)
-	if !parent.fs.flags.Cheap {
 
-		// TODO RNG NOSLASHDIR
-		//go parent.LookUpInodeNotDir(fullName+"/", dirBlobChan, errDirBlobChan)
-		errDirBlobChan <- fuse.ENOENT
+	// try as dir w/ metadata
+	go parent.LookUpInodeNotDir(fullName + GFS_SUFFIX, dirMetaChan, errDirMetaChan)
 
-		if !parent.fs.flags.ExplicitDir {
-			errDirChan = make(chan error, 1)
-			dirChan = make(chan s3.ListObjectsOutput, 1)
-			go parent.LookUpInodeDir(fullName, dirChan, errDirChan)
-		}
-	}
+	// try as dir w/o metadata
+	go parent.LookUpInodeDir(fullName, dirChan, errDirChan)
+
+	errors := make([]error, 0, 3)
 
 	for {
+		// wait for responses
 		select {
+		// objectChan
 		case resp := <-objectChan:
-			err = nil
+			fmt.Printf("@resp objChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName)
 			// XXX/TODO if both object and object/ exists, return dir
 			inode = NewInode(parent.fs, parent, &name, &fullName)
 			inode.Attributes = InodeAttributes{
@@ -1143,6 +1194,138 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 			inode.KnownSize = &size
 
 			inode.fillXattrFromHead(&resp)
+			fmt.Printf("#ret: <-objectChan ('%s')\n", fullName)
+			return
+
+		case e := <-errObjectChan:
+			errors = append(errors, e)
+			fmt.Printf("!%d errObjectChan: %v\n", len(errors), e)
+
+		// dirMetaChan
+		case resp := <-dirMetaChan:
+			fmt.Printf("@resp blobChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName, "", resp.LastModified)
+
+			inode = NewInode(parent.fs, parent, &name, &fullName)
+			inode.ToDir()
+			inode.Attributes.Mtime = *resp.LastModified
+			inode.fillXattrFromHead(&resp)
+			fmt.Printf("#ret: <-blobChan ('%s')\n", fullName)
+			return
+
+		case e := <-errDirMetaChan:
+			errDirMeta = &e
+			errors = append(errors, e)
+			fmt.Printf("!%d errMetaChan: %v\n", len(errors), e)
+
+		// dirChan
+		case resp := <-dirChan:
+			fmt.Printf("@resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
+			respDir = &resp
+
+		case e := <-errDirChan:
+			errors = append(errors, e)
+			fmt.Printf("!%d errDirChan: %v\n", len(errors), e)
+		}
+
+		// bail if all failed
+		if len(errors) == 3 {
+			// all attempts failed - report best error (ENOENT expected, return anything else if possible)
+			for _, e := range errors {
+				if e != fuse.ENOENT {
+					err = e
+					return
+				}
+			}
+			err = fuse.ENOENT
+			return 
+		}
+
+		// use response from dirChan if dirMetaChan failed
+		if respDir != nil && errDirMeta != nil {
+			resp := *respDir
+			fmt.Printf("+resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
+			if len(resp.CommonPrefixes) != 0 || len(resp.Contents) != 0 {
+				inode = NewInode(parent.fs, parent, &name, &fullName)
+				inode.ToDir()
+				if len(resp.Contents) != 0 && *resp.Contents[0].Key == name+"/" {
+					// it's actually a dir blob
+					entry := resp.Contents[0]
+
+					// capture mtime - should be in sync w/ gfs meta
+					inode.Attributes.Mtime = *entry.LastModified
+
+					if entry.ETag != nil {
+						inode.s3Metadata["etag"] = []byte(*entry.ETag)
+					}
+					if entry.StorageClass != nil {
+						inode.s3Metadata["storage-class"] = []byte(*entry.StorageClass)
+					}
+				}
+				fmt.Printf("#ret: <-dirChan ('%s')\n", fullName)
+				return
+			} else {
+				// response ok, but entry not found
+				errors = append(errors, fuse.ENOENT)
+				fmt.Printf("!-%d errDirChan: %v\n", len(errors), fuse.ENOENT)
+			}
+		}
+	}
+}
+
+// returned inode has nil Id
+func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *Inode, err error) {
+	errObjectChan := make(chan error, 1)
+	objectChan := make(chan s3.HeadObjectOutput, 1)
+	errDirBlobChan := make(chan error, 1)
+	dirBlobChan := make(chan s3.HeadObjectOutput, 1)
+	var errDirChan chan error
+	var dirChan chan s3.ListObjectsOutput
+
+	checking := 3
+	// RNG checkErr doc
+	// 0 - obj chan
+	// 1 - blob channel
+	// 2 - dir channel
+	var checkErr [3]error
+
+	if parent.fs.s3 == nil {
+		panic("s3 disabled")
+	}
+
+	go parent.LookUpInodeNotDir(fullName, objectChan, errObjectChan)
+	if !parent.fs.flags.Cheap {
+
+		// RNG lookup gfs blob
+		go parent.LookUpInodeNotDir(fullName + GFS_SUFFIX, dirBlobChan, errDirBlobChan)
+		//errDirBlobChan <- fuse.ENOENT
+
+		if !parent.fs.flags.ExplicitDir {
+			errDirChan = make(chan error, 1)
+			dirChan = make(chan s3.ListObjectsOutput, 1)
+			go parent.LookUpInodeDir(fullName, dirChan, errDirChan)
+		}
+	}
+
+	for {
+		select {
+		case resp := <-objectChan:
+			err = nil
+			// TODO RNG DIRCHAN
+			fmt.Printf("@resp objChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName)
+			// XXX/TODO if both object and object/ exists, return dir
+			inode = NewInode(parent.fs, parent, &name, &fullName)
+			inode.Attributes = InodeAttributes{
+				Size:  uint64(aws.Int64Value(resp.ContentLength)),
+				Mtime: *resp.LastModified,
+			}
+
+			// don't want to point to the attribute because that
+			// can get updated
+			size := inode.Attributes.Size
+			inode.KnownSize = &size
+
+			inode.fillXattrFromHead(&resp)
+			fmt.Printf("#ret: <-objectChan ('%s')\n", fullName)
 			return
 		case err = <-errObjectChan:
 			checking--
@@ -1151,13 +1334,13 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 		case resp := <-dirChan:
 			err = nil
 			if len(resp.CommonPrefixes) != 0 || len(resp.Contents) != 0 {
+				// TODO RNG DIRCHAN
+				fmt.Printf("@resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
 				inode = NewInode(parent.fs, parent, &name, &fullName)
 				inode.ToDir()
 				if len(resp.Contents) != 0 && *resp.Contents[0].Key == name+"/" {
 					// it's actually a dir blob
 					entry := resp.Contents[0]
-					// TODO RNG BLOBCHAN
-					fmt.Printf("/ DIRchan: name=%v, fname=%v, time=%v\n", name, fullName, entry.LastModified)
 
 					if entry.ETag != nil {
 						inode.s3Metadata["etag"] = []byte(*entry.ETag)
@@ -1172,6 +1355,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 				if inode.fs.flags.Cheap {
 					inode.ImplicitDir = true
 				}
+				fmt.Printf("#ret: <-dirChan ('%s')\n", fullName)
 				return
 			} else {
 				checkErr[2] = fuse.ENOENT
@@ -1183,13 +1367,14 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 			s3Log.Debugf("LIST %v/ = %v", fullName, err)
 		case resp := <-dirBlobChan:
 			// TODO RNG BLOBCHAN
-			fmt.Printf("/ BLOBchan: name=%v, fname=%v, time=%v\n", name, fullName, resp.LastModified)
+			fmt.Printf("@resp blobChan: name=%v, fname=%v, key=%v, time=%v\n", name, fullName, "", resp.LastModified)
 
 			err = nil
 			inode = NewInode(parent.fs, parent, &name, &fullName)
 			inode.ToDir()
 			inode.Attributes.Mtime = *resp.LastModified
 			inode.fillXattrFromHead(&resp)
+			fmt.Printf("#ret: <-blobChan ('%s')\n", fullName)
 			return
 		case err = <-errDirBlobChan:
 			checking--
@@ -1200,7 +1385,7 @@ func (parent *Inode) LookUpInodeMaybeDir(name string, fullName string) (inode *I
 		switch checking {
 		case 2:
 			if parent.fs.flags.Cheap {
-				go parent.LookUpInodeNotDir(fullName+"/", dirBlobChan, errDirBlobChan)
+				go parent.LookUpInodeNotDir(fullName + GFS_SUFFIX, dirBlobChan, errDirBlobChan)
 			}
 		case 1:
 			if parent.fs.flags.ExplicitDir {

@@ -839,6 +839,9 @@ func (fs *Goofys) ReadDir(
 		if err != nil {
 			return err
 		}
+		//if i ==0 || i ==1 {
+		//	fmt.Printf("## dir(%s) name='%s', mtime=%v\n", *inode.Name, *e.Name, e.Attributes.Mtime)
+		//}
 
 		// RNG apply all gfs entries
 		// - may be seen before of after DT_Directory entry
@@ -1074,6 +1077,19 @@ func (fs *Goofys) SetInodeAttributes(
 	fs.mu.Lock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
+
+	if op.Mode != nil {
+		fmt.Printf("** SetInodeAttrs(%s) mode=%v(%d)\n", *inode.Name, op.Mode.String(), op.Mode)
+	}
+
+	if op.Mtime != nil {
+		fmt.Printf("** SetInodeAttrs(%s) mtime=%v\n", *inode.Name, *op.Mtime)
+	}
+
+	if op.Mtime != nil {
+		// TODO RNG GFSBLOB
+		inode.touch()
+	}
 
 	attr, err := inode.GetAttributes()
 	if err == nil {

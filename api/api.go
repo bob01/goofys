@@ -51,10 +51,10 @@ type Config struct {
 	TypeCacheTTL time.Duration
 
 	// Debugging
-	DebugFuse  bool
-	DebugS3    bool
-	Foreground bool
-	ShowGfsBlobs bool
+	DebugFuse       bool
+	DebugS3         bool
+	Foreground      bool
+	ShowGfsMetadata bool
 }
 
 func Mount(
