@@ -409,6 +409,8 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 			dh.Entries = append(dh.Entries, en)
 		}
 
+		showMetadata := fs.flags.ShowGfsMetadata
+
 		lastDir := ""
 		for _, obj := range resp.Contents {
 			if !strings.HasPrefix(*obj.Key, prefix) {
@@ -420,30 +422,34 @@ func (dh *DirHandle) ReadDir(offset fuseops.DirOffset) (en *DirHandleEntry, gfse
 
 			slash := strings.Index(baseName, "/")
 			if slash == -1 {
+				// RNG handle metadata cases
 				if len(baseName) == 0 {
 					// shouldn't happen
-					// RNG SLASHDIR - yes it will if slash-dir exists
-					//fmt.Printf("/ key=%v, date=%v", *obj.Key, obj.LastModified)
-					continue
-				}
+					// RNG - yes it can - name == '' - add as slash blob if showing metadata (debug)
+					if !showMetadata {
+						continue
+					}
 
-				// name == *__gfs?
+					// make visible name
+					baseName = "__dir_metadata"
+				} else
+
+				// RNG - name == *__gfs - add obj as gfs entry
 				if strings.HasSuffix(baseName, GFS_SUFFIX) {
-					// RNG - add obj as gfs entry
-					name := baseName[0:len(baseName) - len(GFS_SUFFIX)]
+					name := baseName[0 : len(baseName)-len(GFS_SUFFIX)]
 					gfsAttrs := fs.rootAttrs
 
 					// NOTE: may opt to read metadata from GFS file in the future, just use S3 metadata for now
 					gfsAttrs.Mtime = *obj.LastModified
 
 					en = &DirHandleEntry{
-						Name:		&name,
-						Type:		fuseutil.DT_Directory,
+						Name:       &name,
+						Type:       fuseutil.DT_Directory,
 						Attributes: &gfsAttrs,
 					}
 					gfsens = append(gfsens, en)
 
-					if !fs.flags.ShowGfsMetadata {
+					if !showMetadata {
 						continue
 					}
 				}
