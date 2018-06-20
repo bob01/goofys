@@ -1155,6 +1155,8 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 	var errDirMeta *error
 	var respDir *s3.ListObjectsOutput
 
+	showMetadata := parent.fs.flags.ShowGfsMetadata
+
 	// try as object
 	go parent.LookUpInodeNotDir(fullName, objectChan, errObjectChan)
 
@@ -1185,7 +1187,9 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 			inode.KnownSize = &size
 
 			inode.fillXattrFromHead(&resp)
+			if showMetadata {
 			fmt.Printf("#ret: <-objectChan ('%s')\n", fullName)
+			}
 			return
 
 		case e := <-errObjectChan:
@@ -1200,7 +1204,9 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 			inode.ToDir()
 			inode.Attributes.Mtime = *resp.LastModified
 			inode.fillXattrFromHead(&resp)
+			if showMetadata {
 			fmt.Printf("#ret: <-blobChan ('%s')\n", fullName)
+			}
 			return
 
 		case e := <-errDirMetaChan:
@@ -1234,9 +1240,10 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 			//fmt.Printf("+resp dirChan: name=%v, fname=%v, cp.len=%d, c.len=%d\n", name, fullName, len(resp.CommonPrefixes), len(resp.Contents))
 			inode = NewInode(parent.fs, parent, &name, &fullName)
 			inode.ToDir()
-			if len(resp.Contents) != 0 && *resp.Contents[0].Key == name+"/" {
+			if len(resp.Contents) != 0 && *resp.Contents[0].Key == fullName+"/" {
 				// it's actually a dir blob
 				entry := resp.Contents[0]
+				//fmt.Printf("+resp dirChan: name=%v, fname=%v, / blob time=%v\n", name, fullName, *entry.LastModified)
 
 				// capture mtime - should be in sync w/ gfs meta
 				inode.Attributes.Mtime = *entry.LastModified
@@ -1248,7 +1255,9 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 					inode.s3Metadata["storage-class"] = []byte(*entry.StorageClass)
 				}
 			}
-			fmt.Printf("#ret: <-dirChan ('%s')\n", fullName)
+			if showMetadata {
+				fmt.Printf("#ret: <-dirChan ('%s', mtime=%v)\n", fullName, inode.Attributes.Mtime)
+			}
 			return
 		}
 

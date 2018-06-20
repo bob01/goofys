@@ -137,7 +137,7 @@ func massageArg0() {
 	}
 }
 
-var Version = "use `make build' to fill version hash correctly"
+var Version = "beta"
 
 func main() {
 	VersionHash = Version

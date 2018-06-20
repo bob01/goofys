@@ -192,9 +192,12 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	now := time.Now()
 	fs.rootAttrs = InodeAttributes{
 		Size:  4096,
-		// TODO RNG DIRMTIME
-		//Mtime: time.Date(2000, 1, 1, 5, 0, 0, 0, time.UTC),
 		Mtime: now,
+	}
+
+	if flags.ShowGfsMetadata {
+		// RNG enable MTIME debugging
+		fs.rootAttrs.Mtime = time.Date(2000, 1, 1, 5, 0, 0, 0, time.UTC)
 	}
 
 	fs.bufferPool = BufferPool{}.Init()

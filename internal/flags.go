@@ -82,7 +82,7 @@ func NewApp() (app *cli.App) {
 
 	app = &cli.App{
 		Name:     "gfs",
-		Version:  "0.19.0p-" + VersionHash,
+		Version:  "0.19.0r-" + VersionHash,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
@@ -239,7 +239,7 @@ func NewApp() (app *cli.App) {
 
 			cli.BoolFlag{
 				Name:	"show-gfs-metadata",
-				Usage:	"Include __gfs_metadata blobs in listings",
+				Usage:	"Show metadata objects",
 			},
 		},
 	}
