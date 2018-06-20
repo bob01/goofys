@@ -483,12 +483,19 @@ func (parent *Inode) RmDir(name string) (err error) {
 		return fuse.ENOENT
 	}
 
-	fullName += "/"
-
+	// delete gfs blob
 	params := &s3.DeleteObjectInput{
 		Bucket: &fs.bucket,
-		Key:    fs.key(fullName),
+		Key:    fs.key(fullName + GFS_SUFFIX),
 	}
+
+	_, err = fs.s3.DeleteObject(params)
+	if err != nil {
+		return mapAwsError(err)
+	}
+
+	// delete slash blob
+	params.Key =fs.key(fullName + "/")
 
 	_, err = fs.s3.DeleteObject(params)
 	if err != nil {
@@ -769,12 +776,17 @@ func (parent *Inode) Rename(from string, newParent *Inode, to string) (err error
 
 	size = int64(-1)
 	if fromIsDir {
-		fromFullName += "/"
-		toFullName += "/"
-		size = 0
+		// RNG rename directory object
+		// NOTE: may have to revist size == 0 assumption if someday metadata files have content
+		err = renameObject(fs, 0, fromFullName + "/", toFullName + "/")
+		if err == nil {
+			// ... only if slash-blob rename successful - ignore gfs metadata errors
+			renameObject(fs,0, fromFullName + GFS_SUFFIX, toFullName + GFS_SUFFIX)
+		}
+	} else {
+		// RNG rename non-directory object
+		err = renameObject(fs, size, fromFullName, toFullName)
 	}
-
-	err = renameObject(fs, size, fromFullName, toFullName)
 	return
 }
 
@@ -1188,7 +1200,7 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 
 			inode.fillXattrFromHead(&resp)
 			if showMetadata {
-			fmt.Printf("#ret: <-objectChan ('%s')\n", fullName)
+				fmt.Printf("#ret: <-objectChan ('%s')\n", fullName)
 			}
 			return
 
@@ -1205,7 +1217,7 @@ func (parent *Inode) LookUpInodeMaybeDirGfs(name string, fullName string) (inode
 			inode.Attributes.Mtime = *resp.LastModified
 			inode.fillXattrFromHead(&resp)
 			if showMetadata {
-			fmt.Printf("#ret: <-blobChan ('%s')\n", fullName)
+				fmt.Printf("#ret: <-blobChan ('%s')\n", fullName)
 			}
 			return
 
