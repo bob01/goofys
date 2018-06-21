@@ -581,6 +581,10 @@ func (inode *Inode) fillXattr() (err error) {
 	return
 }
 
+const GFS_XATTR_PREFIX = "gfs."
+const GFS_XATTR_CHKDSK = "chkdsk"
+var gfsXattrMap = map[string][]byte{ GFS_XATTR_CHKDSK: []byte("") }
+
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) getXattrMap(name string, userOnly bool) (
 	meta map[string][]byte, newName string, err error) {
@@ -600,6 +604,10 @@ func (inode *Inode) getXattrMap(name string, userOnly bool) (
 
 		newName = name[5:]
 		meta = inode.userMetadata
+	} else if strings.HasPrefix(name, "gfs.") {
+
+		newName = name[4:]
+		meta = gfsXattrMap
 	} else {
 		if userOnly {
 			return nil, "", syscall.EACCES
@@ -632,7 +640,7 @@ func (inode *Inode) updateXattr() (err error) {
 }
 
 func (inode *Inode) SetXattr(name string, value []byte, flags uint32) error {
-	inode.logFuse("RemoveXattr", name)
+	inode.logFuse("SetXattr", name)
 
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
@@ -683,20 +691,85 @@ func (inode *Inode) RemoveXattr(name string) error {
 func (inode *Inode) GetXattr(name string) ([]byte, error) {
 	inode.logFuse("GetXattr", name)
 
+	value, err := inode.getXattrInternal(name)
+	if err == nil && strings.HasPrefix(name, GFS_XATTR_PREFIX) {
+		value, err = inode.getGfsXattr(name[4:])
+	}
+
+	return value, err
+}
+
+func (inode *Inode) getXattrInternal(name string) ([]byte, error) {
+
 	inode.mu.Lock()
 	defer inode.mu.Unlock()
 
-	meta, name, err := inode.getXattrMap(name, false)
+	meta, key, err := inode.getXattrMap(name, false)
 	if err != nil {
 		return nil, err
 	}
 
-	value, ok := meta[name]
+	value, ok := meta[key]
 	if ok {
 		return []byte(value), nil
 	} else {
 		return nil, syscall.ENODATA
 	}
+}
+
+
+func (inode *Inode) getGfsXattr(name string) (value []byte, err error) {
+
+	// bail if inode not a directory
+	if !inode.isDir() {
+		return nil, fuse.ENOTDIR
+	}
+
+	switch(name) {
+	case GFS_XATTR_CHKDSK:
+		value, err = inode.gfsChkdsk()
+
+	default:
+		// should not happen
+		err = syscall.ENODATA
+	}
+	return
+}
+
+func (inode *Inode) gfsChkdsk() (value []byte, err error) {
+
+	dirMetaChan := make(chan s3.HeadObjectOutput, 1)
+	errDirMetaChan := make(chan error, 1)
+	gfsMetaChan := make(chan s3.HeadObjectOutput, 1)
+	errGfsMetaChan := make(chan error, 1)
+
+	fullname := inode.FullName()
+
+	// check gfs_metadata
+	go inode.LookUpInodeNotDir(*fullname + "/", dirMetaChan, errDirMetaChan)
+	go inode.LookUpInodeNotDir(*fullname + GFS_SUFFIX, gfsMetaChan, errGfsMetaChan)
+
+	var v string
+	select {
+	case resp := <-dirMetaChan:
+		v = "mtime: " + resp.LastModified.String()
+
+	case e:= <-errDirMetaChan:
+		v = e.Error()
+	}
+	s := fmt.Sprintf("dir_metadata: %s\n", v)
+
+	select {
+		case resp := <-gfsMetaChan:
+			v = "mtime: " + resp.LastModified.String()
+
+		case e := <-errGfsMetaChan:
+			v = e.Error()
+	}
+	s += fmt.Sprintf("gfs_metadata: %s\n", v)
+
+	value = []byte(s)
+	return
 }
 
 func (inode *Inode) ListXattr() ([]string, error) {
