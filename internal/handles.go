@@ -741,7 +741,7 @@ func (inode *Inode) getGfsXattr(name string) (value []byte, err error) {
 		return nil, fuse.ENOTDIR
 	}
 
-	value, err = readGfsXattrCache(inode, name)
+	value, err = readGfsXattrFromCache(inode, name)
 	if value != nil || err != nil {
 		return
 	}
@@ -758,7 +758,7 @@ func (inode *Inode) getGfsXattr(name string) (value []byte, err error) {
 		err = syscall.ENODATA
 	}
 
-	writeGfsXattrCache(inode, name, value, err)
+	writeGfsXattrToCache(inode, name, value, err)
 
 	return
 }
@@ -767,7 +767,7 @@ func makeGfsXattrCacheKey(inode *Inode, name string) string {
 	return string(inode.Id) + ":" + name
 }
 
-func readGfsXattrCache(inode *Inode, name string) (value []byte, err error) {
+func readGfsXattrFromCache(inode *Inode, name string) (value []byte, err error) {
 	gfsXattrCacheMu.Lock()
 	defer gfsXattrCacheMu.Unlock()
 
@@ -787,7 +787,7 @@ func readGfsXattrCache(inode *Inode, name string) (value []byte, err error) {
 	}
 }
 
-func writeGfsXattrCache(inode *Inode, name string, value []byte, err error) {
+func writeGfsXattrToCache(inode *Inode, name string, value []byte, err error) {
 	gfsXattrCacheMu.Lock()
 	defer gfsXattrCacheMu.Unlock()
 
@@ -799,49 +799,149 @@ func writeGfsXattrCache(inode *Inode, name string, value []byte, err error) {
 	gfsXattrCacheMap[makeGfsXattrCacheKey(inode, name)] = entry
 }
 
+func (parent *Inode) listObjects(name *string, marker *string, c chan s3.ListObjectsOutput, errc chan error) {
+	params := &s3.ListObjectsInput{
+		Bucket:    &parent.fs.bucket,
+		Delimiter: aws.String("/"),
+		Marker:	   marker,
+		Prefix:    parent.fs.key(*name + "/"),
+	}
+	resp, err := parent.fs.s3.ListObjects(params)
+	if err != nil {
+		errc <- mapAwsError(err)
+		return
+	}
+
+	//if *resp.IsTruncated {
+	//	dh.Marker = resp.NextMarker
+	//} else {
+	//	dh.Marker = nil
+	//}
+
+	c <- *resp
+}
+
 func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 
 	dirMetaChan := make(chan s3.HeadObjectOutput, 1)
 	errDirMetaChan := make(chan error, 1)
 	gfsMetaChan := make(chan s3.HeadObjectOutput, 1)
 	errGfsMetaChan := make(chan error, 1)
+	objectsChan := make(chan s3.ListObjectsOutput, 1)
+	errObjectsChan := make(chan error, 1)
 
 	fullname := inode.FullName()
 
 	// check gfs_metadata
 	go inode.LookUpInodeNotDir(*fullname + "/", dirMetaChan, errDirMetaChan)
 	go inode.LookUpInodeNotDir(*fullname + GFS_SUFFIX, gfsMetaChan, errGfsMetaChan)
+	go inode.listObjects(fullname, nil, objectsChan, errObjectsChan)
 
 	var v string
 
-	var option string
+	var s string
 	if fix {
-		option = "(fixing)"
+		s = "Repairing"
 	} else {
-		option = ""
+		s = "Checking"
 	}
-	s := fmt.Sprintf("   Directory: '%s' %s\n", *fullname, option)
+	s += fmt.Sprintf(" directory: '%s'\n", *fullname)
 
 	var touchDir bool
 	select {
 	case resp := <-dirMetaChan:
 		v = "mtime: " + resp.LastModified.String()
+		s += " "
 
 	case e:= <-errDirMetaChan:
 		v = e.Error()
+		s += "*"
 		touchDir = true
 	}
-	s += fmt.Sprintf("dir_metadata: %s\n", v)
+	s += fmt.Sprintf(" dir_metadata: %s...\n", v)
 
 	select {
 	case resp := <-gfsMetaChan:
 		v = "mtime: " + resp.LastModified.String()
+		s += " "
 
 	case e := <-errGfsMetaChan:
 		v = e.Error()
+		s += "*"
 		touchDir = true
 	}
-	s += fmt.Sprintf("gfs_metadata: %s\n", v)
+	s += fmt.Sprintf(" gfs_metadata: %s...\n", v)
+
+	// objects
+	fnlen := len(*fullname) + 1
+	gfssuflen := len(GFS_SUFFIX)
+	var untouched []string
+	var orphaned []string
+	var dirs []string
+	var metas []string
+	mbl: for {
+		select {
+		case resp := <-objectsChan:
+			for _, commonPrefix := range resp.CommonPrefixes {
+				dirs = append(dirs, (*commonPrefix.Prefix)[fnlen : len(*commonPrefix.Prefix) - 1])
+			}
+			for _, content := range resp.Contents {
+				if !strings.HasSuffix(*content.Key, GFS_SUFFIX) {
+					continue
+				}
+				metas = append(metas, (*content.Key)[fnlen : len(*content.Key) - gfssuflen])
+			}
+			if *resp.IsTruncated {
+				// again
+				go inode.listObjects(fullname, resp.Marker, objectsChan, errObjectsChan)
+			} else {
+				// done
+				break mbl
+			}
+
+		case err = <-errObjectsChan:
+			return
+		}
+	}
+
+	// match
+	sort.Strings(dirs)
+	sort.Strings(metas)
+	dlen := len(dirs)
+	mlen := len(metas)
+
+	di := 0
+	mi := 0
+	for ; di < dlen && mi < mlen; {
+		dir := dirs[di]
+		meta := metas[mi]
+
+		switch strings.Compare(dir, meta) {
+		case -1:
+			// dir < meta - dir w/o meta - add to untouched, advance di
+			untouched = append(untouched, dir)
+			di++
+
+		case 0:
+			// match - advance both
+			di++
+			mi++
+
+		case 1:
+			// dir > meta - orphaned meta - add to orphaned, advance mi
+			orphaned = append(orphaned, meta)
+			mi++
+		}
+	}
+
+	s += fmt.Sprintf(" %8d: subdirectories\n", dlen)
+	s += fmt.Sprintf(" %8d: subdirectory metadata blobs\n", mlen)
+	if len(untouched) != 0 {
+		s += fmt.Sprintf("*%8d: untouched subdirectories: %v\n", len(untouched), untouched)
+	}
+	if len(orphaned) != 0 {
+		s += fmt.Sprintf("*%8d: orphaned subdirectories:  %v\n", len(orphaned), orphaned)
+	}
 
 	// fix issues if -f option specified
 	if fix {
@@ -854,8 +954,8 @@ func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 		}
 		s += ".done"
 	} else {
-		if touchDir {
-			s += "- inconsistencies found, use \"gfs.chkdsk -f\" to repair"
+		if touchDir || len(untouched) != 0 || len(orphaned) != 0 {
+			s += "* Inconsistencies found, use \"gfs.chkdsk -f\" to repair"
 		}
 	}
 
