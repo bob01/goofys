@@ -945,12 +945,34 @@ func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 
 	// fix issues if -f option specified
 	if fix {
+		// fix dir
 		if touchDir {
 			err = inode.touch()
 			if err != nil {
 				return
 			}
 			s += fmt.Sprintf(". touched directory '%s'.\n", *fullname)
+		}
+		// fix untouched
+		for _, dir := range untouched {
+			node, e := inode.LookUp(dir)
+			if e == nil {
+				e = node.touch()
+			}
+			if e != nil {
+				s += fmt.Sprintf(". touching subdirectory '%s': %v\n", dir, e.Error())
+				continue
+			}
+			s += fmt.Sprintf(". touched subdirectory '%s'\n", dir)
+		}
+		// fix orphaned
+		for _, orphan := range orphaned {
+			e := inode.Unlink(orphan + GFS_SUFFIX)
+			if e == nil {
+				s += fmt.Sprintf(". removed orphaned subdirectory '%s'\n", orphan)
+			} else {
+				s += fmt.Sprintf(". removing orphaned subdirectory '%s': %v\n", orphan, e.Error())
+			}
 		}
 		s += ".done"
 	} else {
