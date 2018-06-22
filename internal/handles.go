@@ -581,9 +581,26 @@ func (inode *Inode) fillXattr() (err error) {
 	return
 }
 
-const GFS_XATTR_PREFIX = "gfs."
-const GFS_XATTR_CHKDSK = "chkdsk"
-var gfsXattrMap = map[string][]byte{ GFS_XATTR_CHKDSK: []byte("") }
+
+const gfs_XATTR_PREFIX = "gfs."
+const gfs_XATTR_CHKDSK = "chkdsk"
+const gfs_XATTR_CHKDSKF = "chkdsk -f"
+
+const gfs_XATTR_TTL = 2 * time.Second
+
+type gfsXattrCacheEntry struct {
+	entryTime time.Time
+	value []byte
+	err error
+}
+
+var gfsXattrCacheMu sync.Mutex
+var gfsXattrCacheMap = make(map[string] *gfsXattrCacheEntry)
+
+var gfsXattrMap = map[string][]byte{
+	gfs_XATTR_CHKDSK:  []byte(""),
+	gfs_XATTR_CHKDSKF: []byte(""),
+}
 
 // LOCKS_REQUIRED(inode.mu)
 func (inode *Inode) getXattrMap(name string, userOnly bool) (
@@ -692,7 +709,7 @@ func (inode *Inode) GetXattr(name string) ([]byte, error) {
 	inode.logFuse("GetXattr", name)
 
 	value, err := inode.getXattrInternal(name)
-	if err == nil && strings.HasPrefix(name, GFS_XATTR_PREFIX) {
+	if err == nil && strings.HasPrefix(name, gfs_XATTR_PREFIX) {
 		value, err = inode.getGfsXattr(name[4:])
 	}
 
@@ -717,7 +734,6 @@ func (inode *Inode) getXattrInternal(name string) ([]byte, error) {
 	}
 }
 
-
 func (inode *Inode) getGfsXattr(name string) (value []byte, err error) {
 
 	// bail if inode not a directory
@@ -725,18 +741,65 @@ func (inode *Inode) getGfsXattr(name string) (value []byte, err error) {
 		return nil, fuse.ENOTDIR
 	}
 
+	value, err = readGfsXattrCache(inode, name)
+	if value != nil || err != nil {
+		return
+	}
+
 	switch(name) {
-	case GFS_XATTR_CHKDSK:
-		value, err = inode.gfsChkdsk()
+	case gfs_XATTR_CHKDSK:
+		value, err = inode.gfsChkdsk(false)
+
+	case gfs_XATTR_CHKDSKF:
+		value, err = inode.gfsChkdsk(true)
 
 	default:
 		// should not happen
 		err = syscall.ENODATA
 	}
+
+	writeGfsXattrCache(inode, name, value, err)
+
 	return
 }
 
-func (inode *Inode) gfsChkdsk() (value []byte, err error) {
+func makeGfsXattrCacheKey(inode *Inode, name string) string {
+	return string(inode.Id) + ":" + name
+}
+
+func readGfsXattrCache(inode *Inode, name string) (value []byte, err error) {
+	gfsXattrCacheMu.Lock()
+	defer gfsXattrCacheMu.Unlock()
+
+	// housekeeping - remove expired entries
+	for key, entry := range gfsXattrCacheMap {
+		if expired(entry.entryTime, gfs_XATTR_TTL) {
+			delete(gfsXattrCacheMap, key)
+		}
+	}
+
+	// return cached value if any
+	entry, ok := gfsXattrCacheMap[makeGfsXattrCacheKey(inode, name)]
+	if ok {
+		return entry.value, entry.err
+	} else {
+		return nil, nil
+	}
+}
+
+func writeGfsXattrCache(inode *Inode, name string, value []byte, err error) {
+	gfsXattrCacheMu.Lock()
+	defer gfsXattrCacheMu.Unlock()
+
+	entry := &gfsXattrCacheEntry{
+		value: value,
+		err: err,
+		entryTime: time.Now(),
+	}
+	gfsXattrCacheMap[makeGfsXattrCacheKey(inode, name)] = entry
+}
+
+func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 
 	dirMetaChan := make(chan s3.HeadObjectOutput, 1)
 	errDirMetaChan := make(chan error, 1)
@@ -750,23 +813,51 @@ func (inode *Inode) gfsChkdsk() (value []byte, err error) {
 	go inode.LookUpInodeNotDir(*fullname + GFS_SUFFIX, gfsMetaChan, errGfsMetaChan)
 
 	var v string
+
+	var option string
+	if fix {
+		option = "(fixing)"
+	} else {
+		option = ""
+	}
+	s := fmt.Sprintf("   Directory: '%s' %s\n", *fullname, option)
+
+	var touchDir bool
 	select {
 	case resp := <-dirMetaChan:
 		v = "mtime: " + resp.LastModified.String()
 
 	case e:= <-errDirMetaChan:
 		v = e.Error()
+		touchDir = true
 	}
-	s := fmt.Sprintf("dir_metadata: %s\n", v)
+	s += fmt.Sprintf("dir_metadata: %s\n", v)
 
 	select {
-		case resp := <-gfsMetaChan:
-			v = "mtime: " + resp.LastModified.String()
+	case resp := <-gfsMetaChan:
+		v = "mtime: " + resp.LastModified.String()
 
-		case e := <-errGfsMetaChan:
-			v = e.Error()
+	case e := <-errGfsMetaChan:
+		v = e.Error()
+		touchDir = true
 	}
 	s += fmt.Sprintf("gfs_metadata: %s\n", v)
+
+	// fix issues if -f option specified
+	if fix {
+		if touchDir {
+			err = inode.touch()
+			if err != nil {
+				return
+			}
+			s += fmt.Sprintf(". touched directory '%s'.\n", *fullname)
+		}
+		s += ".done"
+	} else {
+		if touchDir {
+			s += "- inconsistencies found, use \"gfs.chkdsk -f\" to repair"
+		}
+	}
 
 	value = []byte(s)
 	return
