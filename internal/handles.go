@@ -845,7 +845,7 @@ func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 	} else {
 		s = "Checking"
 	}
-	s += fmt.Sprintf(" directory: '%s'\n", *fullname)
+	s += fmt.Sprintf(" directory: '%s'...\n", *fullname)
 
 	var touchDir bool
 	select {
@@ -858,7 +858,7 @@ func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 		s += "*"
 		touchDir = true
 	}
-	s += fmt.Sprintf(" dir_metadata: %s...\n", v)
+	s += fmt.Sprintf(" dir_metadata: %s\n", v)
 
 	select {
 	case resp := <-gfsMetaChan:
@@ -870,7 +870,7 @@ func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 		s += "*"
 		touchDir = true
 	}
-	s += fmt.Sprintf(" gfs_metadata: %s...\n", v)
+	s += fmt.Sprintf(" gfs_metadata: %s\n", v)
 
 	// objects
 	fnlen := len(*fullname) + 1
@@ -978,6 +978,8 @@ func (inode *Inode) gfsChkdsk(fix bool) (value []byte, err error) {
 	} else {
 		if touchDir || len(untouched) != 0 || len(orphaned) != 0 {
 			s += "* Inconsistencies found, use \"gfs.chkdsk -f\" to repair"
+		} else {
+			s += ".done"
 		}
 	}
 
