@@ -211,7 +211,7 @@ func NewGoofys(ctx context.Context, bucket string, awsConfig *aws.Config, flags 
 	root.Attributes.Mtime = fs.rootAttrs.Mtime
 
 	// TODO RNG dump flags
-	fmt.Printf("** stat TTL %d, type TTL %d\n", fs.flags.StatCacheTTL, fs.flags.TypeCacheTTL)
+	//fmt.Printf("** stat TTL %d, type TTL %d\n", fs.flags.StatCacheTTL, fs.flags.TypeCacheTTL)
 
 	fs.inodes[fuseops.RootInodeID] = root
 
