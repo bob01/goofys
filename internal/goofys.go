@@ -505,6 +505,12 @@ func (fs *Goofys) GetXattr(ctx context.Context,
 
 func (fs *Goofys) ListXattr(ctx context.Context,
 	op *fuseops.ListXattrOp) (err error) {
+
+	if !fs.flags.IncludeXattrs {
+		err = fuse.ENOSYS
+		return
+	}
+
 	fs.mu.Lock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
@@ -535,6 +541,12 @@ func (fs *Goofys) ListXattr(ctx context.Context,
 
 func (fs *Goofys) RemoveXattr(ctx context.Context,
 	op *fuseops.RemoveXattrOp) (err error) {
+
+	if !fs.flags.IncludeXattrs {
+		err = fuse.ENOSYS
+		return
+	}
+
 	fs.mu.Lock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
@@ -546,6 +558,12 @@ func (fs *Goofys) RemoveXattr(ctx context.Context,
 
 func (fs *Goofys) SetXattr(ctx context.Context,
 	op *fuseops.SetXattrOp) (err error) {
+
+	if !fs.flags.IncludeXattrs {
+		err = fuse.ENOSYS
+		return
+	}
+	
 	fs.mu.Lock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
