@@ -265,7 +265,7 @@ func NewApp() (app *cli.App) {
 		flagCategories[f] = "tuning"
 	}
 
-	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-metadata"} {
+	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-metadata", "include-xattrs"} {
 		flagCategories[f] = "misc"
 	}
 
