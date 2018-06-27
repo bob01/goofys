@@ -467,6 +467,7 @@ func (fs *Goofys) GetInodeAttributes(
 		op.Attributes = *attr
 		op.AttributesExpiration = time.Now().Add(fs.flags.StatCacheTTL)
 	}
+	//fmt.Printf("Inode.name='%s'\nAtime=%d, Mtime=%d, Ctime=%d, Crtime=%d, ?time=%v\n", *inode.Name, attr.Atime.Nanosecond(), attr.Mtime.Nanosecond(), attr.Ctime.Nanosecond(), attr.Crtime.Nanosecond(), attr.Mtime)
 
 	// TODO RNG DIRMTIME
 	//fmt.Printf("* GetInodeAttributesOp(%d:%s), dir=%v, mtime=%v, mtimez=%v\n",
@@ -477,6 +478,12 @@ func (fs *Goofys) GetInodeAttributes(
 
 func (fs *Goofys) GetXattr(ctx context.Context,
 	op *fuseops.GetXattrOp) (err error) {
+
+	if !fs.flags.IncludeXattrs {
+		err = fuse.ENOSYS
+		return
+	}
+
 	fs.mu.Lock()
 	inode := fs.getInodeOrDie(op.Inode)
 	fs.mu.Unlock()
