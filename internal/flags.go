@@ -82,7 +82,7 @@ func NewApp() (app *cli.App) {
 
 	app = &cli.App{
 		Name:     "gfs",
-		Version:  "0.19.0r-" + VersionHash,
+		Version:  "0.19.0s0-" + VersionHash,
 		Usage:    "Mount an S3 bucket locally",
 		HideHelp: true,
 		Writer:   os.Stderr,
@@ -241,6 +241,12 @@ func NewApp() (app *cli.App) {
 				Name:	"show-gfs-metadata",
 				Usage:	"Show metadata objects",
 			},
+
+			cli.BoolFlag{
+				Name:	"include-xattrs" +
+					"",
+				Usage:	"Include extended attributes",
+			},
 		},
 	}
 
@@ -308,6 +314,7 @@ type FlagStorage struct {
 	DebugS3         bool
 	Foreground      bool
 	ShowGfsMetadata bool
+	IncludeXattrs   bool
 }
 
 func parseOptions(m map[string]string, s string) {
@@ -376,6 +383,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DebugS3:         c.Bool("debug_s3"),
 		Foreground:      c.Bool("f"),
 		ShowGfsMetadata: c.Bool("show-gfs-metadata"),
+		IncludeXattrs:   c.Bool("include-xattrs"),
 	}
 
 	// Handle the repeated "-o" flag.
