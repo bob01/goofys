@@ -55,7 +55,7 @@ type Config struct {
 	DebugS3         bool
 	Foreground      bool
 	ShowGfsMetadata bool
-	IncludeXattrs   bool
+	EnableXattrs    bool
 }
 
 func Mount(

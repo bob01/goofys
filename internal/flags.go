@@ -243,7 +243,7 @@ func NewApp() (app *cli.App) {
 			},
 
 			cli.BoolFlag{
-				Name:	"include-xattrs" +
+				Name:	"enable-xattrs" +
 					"",
 				Usage:	"Include extended attributes",
 			},
@@ -265,7 +265,7 @@ func NewApp() (app *cli.App) {
 		flagCategories[f] = "tuning"
 	}
 
-	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-metadata", "include-xattrs"} {
+	for _, f := range []string{"help, h", "debug_fuse", "debug_s3", "version, v", "f", "show-gfs-metadata", "enable-xattrs"} {
 		flagCategories[f] = "misc"
 	}
 
@@ -314,7 +314,7 @@ type FlagStorage struct {
 	DebugS3         bool
 	Foreground      bool
 	ShowGfsMetadata bool
-	IncludeXattrs   bool
+	EnableXattrs    bool
 }
 
 func parseOptions(m map[string]string, s string) {
@@ -383,7 +383,7 @@ func PopulateFlags(c *cli.Context) (ret *FlagStorage) {
 		DebugS3:         c.Bool("debug_s3"),
 		Foreground:      c.Bool("f"),
 		ShowGfsMetadata: c.Bool("show-gfs-metadata"),
-		IncludeXattrs:   c.Bool("include-xattrs"),
+		EnableXattrs:    c.Bool("enable-xattrs"),
 	}
 
 	// Handle the repeated "-o" flag.

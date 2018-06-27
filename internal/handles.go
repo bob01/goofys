@@ -534,7 +534,7 @@ func (inode *Inode) fillXattrFromHead(resp *s3.HeadObjectOutput) {
 	inode.userMetadata = make(map[string][]byte)
 
 	// bail if xattrs disabled
-	if !inode.fs.flags.IncludeXattrs {
+	if !inode.fs.flags.EnableXattrs {
 		return
 	}
 
