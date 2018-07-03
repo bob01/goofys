@@ -479,7 +479,7 @@ func (fs *Goofys) GetInodeAttributes(
 func (fs *Goofys) GetXattr(ctx context.Context,
 	op *fuseops.GetXattrOp) (err error) {
 
-	if !fs.flags.EnableXattrs {
+	if !strings.HasPrefix(op.Name, gfs_XATTR_PREFIX) && !fs.flags.EnableXattrs {
 		err = fuse.ENOSYS
 		return
 	}
